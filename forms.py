@@ -9,7 +9,6 @@ class RegistrationForm(FlaskForm):
     password = PasswordField('Password', [DataRequired(), Length(max=50)])
     confirmed_password = PasswordField("Confirm Password", [EqualTo(
         'password', "Password must be the same!"), Length(max=50)])
-    i_am_human = BooleanField('I Am Human', [DataRequired()])
     submit = SubmitField('Register')
 
 
