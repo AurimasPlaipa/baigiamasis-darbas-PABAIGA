@@ -42,8 +42,8 @@ login_manager.login_message = "You need to Login!"
 class User(db.Model, UserMixin):
     __tablename__ = "user"
     id = db.Column(db.Integer, primary_key=True)
-    user = db.Column("user", db.String(50), nullable=False)
-    email = db.Column("email", db.String(50), unique=True, nullable=False)
+    user = db.Column("user", db.String(75), nullable=False)
+    email = db.Column("email", db.String(75), unique=True, nullable=False)
     password = db.Column("password", db.String(50), nullable=False)
 
 
@@ -130,7 +130,7 @@ def index():
         return render_template("index.html")
 
 
-# ******************************** Category LIST *********************************
+# ******************************** Categories *********************************
 
 @app.route("/categories")
 def categories():
@@ -184,7 +184,7 @@ def delete_category(id):
     else:
         return render_template("index.html")
 
-# ******************************** Uzrasai LIST *********************************
+# ******************************** Notes *********************************
 
 
 @app.route("/notes")
@@ -211,6 +211,29 @@ def add_note():
         return render_template("add_note.html", form=form)
     else:
         return render_template("index.html")
+
+@app.route("/edit_notes/<int:id>", methods=['GET', 'POST'])
+def edit_notes(id):
+    if current_user.is_authenticated:
+        form = forms.NotesForm()
+        notes = Notes.query.get(id)
+        if form.validate_on_submit():
+            notes.description = form.description.data
+            db.session.commit()
+            return redirect(url_for('categories'))
+        return render_template("edit_category.html", form=form, notes=notes)
+    else:
+        return render_template("index.html")
+
+
+
+
+
+
+
+
+
+
 
 # @app.route("/products/edit/<int:id>", methods=['GET', 'POST'])
 # @login_required
