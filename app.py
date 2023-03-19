@@ -4,16 +4,21 @@ import forms
 from datetime import datetime
 from flask_marshmallow import Marshmallow
 from flask_bcrypt import Bcrypt
-from flask_login import LoginManager, UserMixin, current_user, logout_user, login_user, login_required
+from flask_login import LoginManager, UserMixin, current_user, logout_user, login_user
 from flask import Flask, request, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from flask_admin import Admin
-from flask_admin.contrib.sqla import ModelView
-from enum import Enum
 from sqlalchemy.orm import backref
 from sqlalchemy.exc import IntegrityError
 from flask_wtf.csrf import CSRFProtect
+import secrets
+from PIL import Image
+from flask_wtf import FlaskForm
+from flask_wtf.file import FileField, FileAllowed
+from wtforms import StringField, SubmitField
+from wtforms.validators import DataRequired, Length
+from wtforms_sqlalchemy.fields import QuerySelectField
+
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -32,6 +37,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'Login'
@@ -42,15 +48,15 @@ login_manager.login_message = "You need to Login!"
 class User(db.Model, UserMixin):
     __tablename__ = "user"
     id = db.Column(db.Integer, primary_key=True)
-    user = db.Column("user", db.String(75), nullable=False)
-    email = db.Column("email", db.String(75), unique=True, nullable=False)
+    user = db.Column("user", db.String(50), nullable=False)
+    email = db.Column("email", db.String(50), unique=True, nullable=False)
     password = db.Column("password", db.String(50), nullable=False)
 
 
 class Category(db.Model):
     __tablename__ = "category"
     id = db.Column(db.Integer, primary_key=True)
-    description = db.Column("description", db.String, nullable=False)
+    description = db.Column("description", db.String(20), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     user = db.relationship("User")
 
@@ -60,13 +66,15 @@ class Notes(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     description = db.Column("description", db.String, nullable=False)
     text = db.Column("text", db.String(500), nullable=False)
+    photo = db.Column(db.String(20), nullable=False)
+    category = db.Column("category", db.String(
+        20), nullable=False, default="Other")
     date = db.Column(db.DateTime, nullable=True, default=datetime.now())
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     user = db.relationship("User")
-    category_id = db.Column(db.Integer, db.ForeignKey("category.id"))
-    category = db.relationship("Category", lazy=True)
 
-# ************************************* USER REGISTRATION / LOGIN ********************
+
+# ************************************* USER ACCOUNT ********************
 
 
 @app.route("/register", methods=['GET', 'POST'])
@@ -125,19 +133,21 @@ def load_user(user_id):
 @app.route("/")
 def index():
     if current_user.is_authenticated:
-        return render_template("index.html", user=current_user.user)
+        categories = Category.query.filter_by(user_id=current_user.id).all()
+        return render_template("index.html", categories=categories, user=current_user.user)
     else:
         return render_template("index.html")
 
 
-# ******************************** Categories *********************************
+# ******************************** Category LIST *********************************
 
 @app.route("/categories")
 def categories():
     db.create_all()
     if current_user.is_authenticated:
         page = request.args.get('page', 1, type=int)
-        categories = Category.query.filter_by(user_id=current_user.id).paginate(page=page, per_page=8)
+        categories = Category.query.filter_by(
+            user_id=current_user.id).paginate(page=page, per_page=8)
         return render_template("categories.html", categories=categories, user=current_user.user)
     else:
         return render_template("index.html")
@@ -163,13 +173,19 @@ def add_category():
 @app.route("/edit_category/<int:id>", methods=['GET', 'POST'])
 def edit_category(id):
     if current_user.is_authenticated:
-        form = forms.CategoryForm()
-        category = Category.query.get(id)
-        if form.validate_on_submit():
-            category.description = form.description.data
-            db.session.commit()
-            return redirect(url_for('categories'))
-        return render_template("edit_category.html", form=form, category=category)
+        try:
+            get_category_user_id = Category.query.filter_by(id=id).first()
+            if current_user.id != get_category_user_id.user_id:
+                return render_template("401.html")
+            form = forms.CategoryForm()
+            category = Category.query.get(id)
+            if form.validate_on_submit():
+                category.description = form.description.data
+                db.session.commit()
+                return redirect(url_for('categories'))
+            return render_template("edit_category.html", form=form, category=category)
+        except AttributeError:
+            return render_template("404.html")
     else:
         return render_template("index.html")
 
@@ -177,22 +193,85 @@ def edit_category(id):
 @app.route("/delete_category/<int:id>")
 def delete_category(id):
     if current_user.is_authenticated:
-        category = Category.query.get(id)
-        db.session.delete(category)
-        db.session.commit()
-        return redirect(url_for('categories'))
+        try:
+            get_category_user_id = Category.query.filter_by(id=id).first()
+            if current_user.id != get_category_user_id.user_id:
+                return render_template("401.html")
+            category = Category.query.get(id)
+            db.session.delete(category)
+            db.session.commit()
+            return redirect(url_for('categories'))
+        except AttributeError:
+            return render_template("404.html")
     else:
         return render_template("index.html")
 
-# ******************************** Notes *********************************
+# ******************************** PICTURE *********************************
 
 
-@app.route("/notes")
+def save_picture(form_picture):
+    random_hex = secrets.token_hex(8)
+    _, f_ext = os.path.splitext(form_picture.filename)
+    picture_fn = random_hex + f_ext
+    picture_path = os.path.join(app.root_path + '/static/images', picture_fn)
+    print(app.root_path)
+    print(picture_path)
+    output_size = (160, 160)
+    i = Image.open(form_picture)
+    i.thumbnail(output_size)
+    i.save(picture_path)
+
+    return picture_fn
+
+# ******************************** CLASSES *********************************
+
+
+class NoteForm(FlaskForm):
+    description = StringField('Description', [DataRequired(), Length(max=200)])
+    text = StringField('Text', [DataRequired(), Length(max=500)])
+    photo = FileField('Add photo', validators=[
+                      DataRequired(), FileAllowed(['jpg', 'png'])])
+    category = QuerySelectField('Select category', query_factory=lambda: Category.query.filter_by(
+        user_id=current_user.id).all(), get_label='description')
+    submit = SubmitField('SUBMIT')
+
+
+class FilterNotesByCategory(FlaskForm):
+    category = QuerySelectField('Select category', query_factory=lambda: Category.query.filter_by(
+        user_id=current_user.id).all(), get_label='description')
+
+
+class FilterNotesByName(FlaskForm):
+    description = StringField('Enter name', [Length(max=100)])
+
+
+# ******************************** Notes LIST *********************************
+
+
+@app.route("/notes", methods=["GET", "POST"])
 def notes():
     db.create_all()
+    form = FilterNotesByCategory()
+    form_name = FilterNotesByName()
     if current_user.is_authenticated:
-        notes = Notes.query.filter_by(user_id=current_user.id).all()
-        return render_template("notes.html", notes=notes, user=current_user.user)
+        page = request.args.get('page', 1, type=int)
+        categories = Category.query.filter_by(
+            user_id=current_user.id).all()
+        if form_name.description.data:
+            description = form_name.description.data
+            searching_name = Notes.query.filter_by(user_id=current_user.id).filter(
+                Notes.description.like('%' + description + '%')).all()
+        else:
+            searching_name = 0
+
+        if form.category.data:
+            category = form.category.data
+            notes = Notes.query.filter_by(
+                user_id=current_user.id, category=category.description).paginate(page=page, per_page=3)
+        else:
+            notes = Notes.query.filter_by(
+                user_id=current_user.id).paginate(page=page, per_page=3)
+        return render_template("notes.html", form_name=form_name, form=form, searching_name=searching_name, notes=notes, categories=categories, user=current_user.user)
     else:
         return render_template("index.html")
 
@@ -201,74 +280,62 @@ def notes():
 def add_note():
     db.create_all()
     if current_user.is_authenticated:
-        form = forms.NotesForm()
-        if form.validate_on_submit():
-            new_note = Notes(description=form.description.data, text=form.text.data,
+        form = NoteForm()
+        if request.method == 'POST' and form.validate_on_submit():
+            if form.photo.data:
+                photo = save_picture(form.photo.data)
+            if form.category.data:
+                category = form.category.data
+            new_note = Notes(description=form.description.data, text=form.text.data, photo=photo, category=category.description,
                              user_id=current_user.id)
             db.session.add(new_note)
             db.session.commit()
             return redirect(url_for('notes'))
-        return render_template("add_note.html", form=form)
+        picture = url_for('static', filename='/images/' + Notes.photo)
+        return render_template("add_note.html", form=form, picture=picture)
     else:
         return render_template("index.html")
 
-@app.route("/edit_notes/<int:id>", methods=['GET', 'POST'])
-def edit_notes(id):
+
+@app.route("/edit_note/<int:id>", methods=['GET', 'POST'])
+def edit_note(id):
     if current_user.is_authenticated:
-        form = forms.NotesForm()
-        notes = Notes.query.get(id)
-        if form.validate_on_submit():
-            notes.description = form.description.data
-            db.session.commit()
-            return redirect(url_for('categories'))
-        return render_template("edit_category.html", form=form, notes=notes)
+        try:
+            get_category_user_id = Notes.query.filter_by(id=id).first()
+            if current_user.id != get_category_user_id.user_id:
+                return render_template("401.html")
+            form = NoteForm()
+            notes = Notes.query.get(id)
+            if form.validate_on_submit():
+                notes.photo = save_picture(form.photo.data)
+                notes.description = form.description.data
+                notes.text = form.text.data
+                category = form.category.data
+                notes.category = category.description
+                db.session.commit()
+                return redirect(url_for('notes'))
+            return render_template("edit_note.html", form=form, notes=notes)
+        except AttributeError:
+            return render_template("404.html")
     else:
         return render_template("index.html")
 
 
-
-
-
-
-
-
-
-
-
-# @app.route("/products/edit/<int:id>", methods=['GET', 'POST'])
-# @login_required
-# def update_product(id):
-#     form = forms.ProductForm()
-#     product = Product.query.get(id)
-#     if form.validate_on_submit():
-#         product.description = form.description.data
-#         product.price = form.price.data
-#         product.quantity = form.quantity.data
-#         product.unit = form.unit.data
-#         db.session.commit()
-#         return redirect(url_for('shopping_records'))
-#     return render_template("update_product.html", form=form, product=product)
-
-
-# @app.route("/product_status/<int:id>", methods=['GET', 'POST'])
-# @login_required
-# def product_status(id):
-#     form = forms.StatusProductForm()
-#     product = Product.query.get(id)
-#     if form.validate_on_submit():
-#         product.status = form.status.data
-#         db.session.commit()
-#         return redirect(url_for('shopping_records'))
-#     return render_template("products.html", form=form, product=product)
-
-
-# @app.route("/products/delete/<int:id>")
-# @login_required
-# def delete_product(id):
-#     product_event = Product.query.get(id)
-#     db.session.delete(product_event)
-#     db.session.commit()
-#     return redirect(url_for('shopping_records'))
+@app.route("/delete_note/<int:id>")
+def delete_note(id):
+    if current_user.is_authenticated:
+        try:
+            get_note_user_id = Notes.query.filter_by(id=id).first()
+            if current_user.id != get_note_user_id.user_id:
+                return render_template("401.html")
+            note = Notes.query.get(id)
+            db.session.delete(note)
+            db.session.commit()
+            return redirect(url_for('notes'))
+        except AttributeError:
+            return render_template("404.html")
+    else:
+        return render_template("index.html")
 
 
 # ********************************** ERRORS ***********************
@@ -288,7 +355,7 @@ def server_error(error):
     return render_template('500.html'), 500
 
 
-# ******************************** RUN APP **********************
+# ******************************** APP **********************
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8002, debug=True)

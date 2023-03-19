@@ -50,11 +50,10 @@
        
         <div class="collapse navbar-collapse" id="navbarResponsive">
           <ul class="navbar-nav ml-auto">
-         
             {% if current_user.is_authenticated %}
             <h3 class="navbar-brand">Nice to see you {{user}}</h3>
             <li class="nav-item">
-              <a class="btn btn-dark mr-2" href="/notes">Home</a>
+              <a class="btn btn-dark mr-2" href="/">Home</a>
             </li>
             <li class="nav-item">
               <a class="btn btn-dark mr-2" href="/categories">Categories</a>

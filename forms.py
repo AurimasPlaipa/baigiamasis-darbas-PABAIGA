@@ -1,5 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, TextAreaField, SubmitField, PasswordField, IntegerField, BooleanField, SelectField
+from flask_wtf.file import FileField, FileAllowed
+from wtforms import StringField, SubmitField, PasswordField, BooleanField, SelectField
 from wtforms.validators import DataRequired, Length, EqualTo, Email
 
 
@@ -24,8 +25,7 @@ class CategoryForm(FlaskForm):
     submit = SubmitField('SUBMIT')
 
 
-class NotesForm(FlaskForm):
-    description = StringField('Product', [DataRequired(), Length(max=200)])
-    text = TextAreaField('Product', [DataRequired(), Length(max=200)])
-    submit = SubmitField('SUBMIT')
 
+class UpdatePhoto(FlaskForm):
+    photo = FileField('Add photo', validators=[DataRequired(), FileAllowed(['jpg', 'png'])])
+    submit = SubmitField('SUBMIT')
